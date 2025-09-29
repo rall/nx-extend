@@ -1,5 +1,5 @@
 {
-  "name": "@nx-extend/gcp-cloud-run",
+  "name": "@spy-coach/gcp-cloud-run",
   "version": "13.0.0",
   "homepage": "https://github.com/TriPSs/nx-extend/blob/master/packages/gcp-cloud-run/README.md",
   "bugs": {
@@ -12,7 +12,8 @@
   "license": "MIT",
   "main": "src/index.js",
   "peerDependencies": {
-    "@nx/devkit": "^21.0.0"
+    "@nx/devkit": "21.5.3",
+    "@nx-extend/core": "9.0.0"
   },
   "builders": "./executors.json",
   "generators": "./generators.json"
