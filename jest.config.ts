@@ -1,4 +1,4 @@
-/* eslint-disable */
+ 
 export default {
   displayName: 'gcp-cloud-run',
   preset: '../../jest.preset.js',

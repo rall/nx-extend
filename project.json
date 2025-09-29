@@ -5,58 +5,21 @@
   "projectType": "library",
   "tags": [],
   "targets": {
-    "lint": {
-      "executor": "@nrwl/linter:eslint",
-      "options": {
-        "lintFilePatterns": ["packages/gcp-cloud-run/**/*.ts"]
-      }
-    },
-    "test": {
-      "executor": "@nx/jest:jest",
-      "outputs": ["{workspaceRoot}/coverage/packages/gcp-cloud-run"],
-      "options": {
-        "jestConfig": "packages/gcp-cloud-run/jest.config.ts"
-      }
-    },
     "build": {
       "executor": "@nx/js:tsc",
       "outputs": ["{options.outputPath}"],
       "options": {
-        "outputPath": "dist/packages/gcp-cloud-run",
+        "outputPath": "{projectRoot}/dist/",
         "tsConfig": "packages/gcp-cloud-run/tsconfig.lib.json",
-        "packageJson": "packages/gcp-cloud-run/package.json",
-        "main": "packages/gcp-cloud-run/src/index.ts",
+        "packageJson": "{projectRoot}/package.json",
+        "main": "{projectRoot}/src/index.ts",
         "buildableProjectDepsInPackageJsonType": "dependencies",
-        "updateBuildableProjectDepsInPackageJson": true,
-        "assets": [
-          "packages/gcp-cloud-run/*.md",
-          {
-            "input": "./packages/gcp-cloud-run/src",
-            "glob": "**/*.!(ts)",
-            "output": "./src"
-          },
-          {
-            "input": "./packages/gcp-cloud-run",
-            "glob": "generators.json",
-            "output": "."
-          },
-          {
-            "input": "./packages/gcp-cloud-run",
-            "glob": "executors.json",
-            "output": "."
-          }
-        ]
+        "updateBuildableProjectDepsInPackageJson": true
       }
     },
     "version": {
       "executor": "@jscutlery/semver:version",
       "options": {}
-    },
-    "publish": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "npm publish ./dist/packages/gcp-cloud-run --access public || true"
-      }
     }
   }
 }
