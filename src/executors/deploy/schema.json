@@ -62,6 +62,20 @@
     "volumeMount": {
       "type": "string",
       "description": "Should be in format 'VOLUME_NAME,mount-path=MOUNT_PATH'"
+    },
+    "tagWithVersion": {
+      "type": "boolean",
+      "default": false,
+      "description": "Tag image with package version"
+    },
+    "manifestType": {
+      "type": "string",
+      "enum": [
+        "node",
+        "python"
+      ],
+      "default": "node",
+      "description": "Manifest format: package.json or pyproject.toml"
     }
   }
 }
