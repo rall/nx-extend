@@ -1,7 +1,8 @@
 import { ExecutorContext, logger, readJsonFile } from '@nx/devkit'
-import { buildCommand, execCommand, getOutputDirectoryFromBuildTarget } from '@nx-extend/core'
+import { execCommand, getOutputDirectoryFromBuildTarget } from '@nx-extend/core'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import yargsUnparser from 'yargs-unparser'
 
 import { ContainerFlags, getContainerFlags } from './utils/get-container-flags'
 
@@ -20,7 +21,8 @@ export interface ExecutorSchema extends ContainerFlags {
   cloudSqlInstance?: string
   logsDir?: string
   serviceAccount?: string
-  tagWithVersion?: string
+  tagWithVersion?: boolean
+  manifestType?: 'node' | 'python'
   revisionSuffix?: string
   buildWith?: 'artifact-registry'
   noTraffic?: boolean
@@ -45,7 +47,7 @@ export async function deployExecutor(
   options: ExecutorSchema,
   context: ExecutorContext
 ): Promise<{ success: boolean }> {
-  const { root } = context.projectsConfigurations.projects[context.projectName]
+  const { root } = context.projectsConfigurations.projects[String(context.projectName)]
 
   const buildTarget = options.buildTarget || `${context.projectName}:build`
   const outputDirectory = getOutputDirectoryFromBuildTarget(context, buildTarget)
@@ -65,15 +67,13 @@ export async function deployExecutor(
     cloudSqlInstance,
     serviceAccount,
     tagWithVersion = false,
-    noTraffic = false,
-
+    manifestType = 'node',
+    noTraffic,
     executionEnvironment,
     vpcConnector,
     vpcEgress,
-
-    revisionSuffix = false,
+    revisionSuffix,
     timeout,
-
     cpuBoost,
     ingress,
     // VOLUME_NAME,type=VOLUME_TYPE,size=SIZE_LIMIT'
@@ -81,6 +81,10 @@ export async function deployExecutor(
 
     sidecars = []
   } = options
+
+  if (!name) {
+    throw new Error('Project name is required (name)')
+  }
 
   const distDirectory = join(context.root, outputDirectory)
 
@@ -95,16 +99,43 @@ export async function deployExecutor(
     writeFileSync(join(distDirectory, 'Dockerfile'), dockerFile)
   }
 
-  let packageVersion = null
+  let packageVersion: string | null = null
 
-  if (tagWithVersion) {
-    const packageJsonLocation = join(context.root, `${root}`, 'package.json')
-
-    if (existsSync(packageJsonLocation)) {
-      const packageJson = readJsonFile(packageJsonLocation)
-
-      if (packageJson && packageJson.version) {
-        packageVersion = `v${packageJson.version.replace(/\./g, '-')}`
+  if (tagWithVersion) {  
+    if (manifestType === 'node') {
+      // Read from package.json only
+      const packageJsonPath = join(context.root, root, 'package.json')
+      
+      if (existsSync(packageJsonPath)) {
+        const packageJson = readJsonFile(packageJsonPath)
+        if (packageJson?.version) {
+          packageVersion = `v${packageJson.version.replace(/\./g, '-')}`
+          logger.info(`Using package.json version: ${packageJson.version}`)
+        }
+      } else {
+        logger.warn('tagWithVersion is enabled but package.json not found')
+      }
+    } else if (manifestType === 'python') {
+      // Read from pyproject.toml only
+      const pyprojectPath = join(context.root, root, 'pyproject.toml')
+      
+      if (existsSync(pyprojectPath)) {
+        try {
+          const pyprojectContent = readFileSync(pyprojectPath, 'utf-8')
+          // Match: version = "1.0.0" or version = '1.0.0' with optional whitespace
+          const versionMatch = pyprojectContent.match(/^\s*version\s*=\s*["']([^"']+)["']\s*$/m)
+          
+          if (versionMatch) {
+            packageVersion = `v${versionMatch[1].replace(/\./g, '-')}`
+            logger.info(`Using pyproject.toml version: ${versionMatch[1]}`)
+          } else {
+            logger.warn('pyproject.toml found but no version field detected')
+          }
+        } catch (error) {
+          logger.warn(`Failed to parse pyproject.toml: ${error}`)
+        }
+      } else {
+        logger.warn('tagWithVersion is enabled but pyproject.toml not found')
       }
     }
   }
@@ -112,42 +143,52 @@ export async function deployExecutor(
   let gcloudDeploy = 'gcloud run deploy'
   if (options.volumeName) {
     logger.warn('Volumes are still in beta, using "gcloud beta" to deploy.\n')
-
     gcloudDeploy = 'gcloud beta run deploy'
   }
 
-  return execCommand(buildCommand([
-    `${gcloudDeploy} ${name}`,
-    `--project=${project}`,
-    '--platform=managed',
-    '--quiet',
-    `--region=${region}`,
-    `--min-instances=${minInstances}`,
-    `--max-instances=${maxInstances}`,
-    `--concurrency=${concurrency}`,
-    executionEnvironment && `--execution-environment=${executionEnvironment}`,
-    vpcConnector && `--vpc-connector=${vpcConnector}`,
-    vpcEgress && `--vpc-egress=${vpcEgress}`,
-    ingress && `--ingress=${ingress}`,
-    revisionSuffix && `--revision-suffix=${revisionSuffix}`,
-    serviceAccount && `--service-account=${serviceAccount}`,
-    timeout && `--timeout=${timeout}`,
-    cloudSqlInstance && `--add-cloudsql-instances=${cloudSqlInstance}`,
-    tagWithVersion && packageVersion && `--tag=${packageVersion}`,
-    typeof cpuBoost === 'boolean' && cpuBoost && '--cpu-boost',
-    typeof cpuBoost === 'boolean' && !cpuBoost && '--no-cpu-boost',
-    noTraffic && '--no-traffic',
-    allowUnauthenticated && '--allow-unauthenticated',
-    volumeName && `--add-volume=name=${volumeName}`,
+  // Build command arguments object
+  const args = {
+    _: [name],
+    project,
+    platform: 'managed',
+    quiet: true,
+    region,
+    'min-instances': minInstances,
+    'max-instances': maxInstances,
+    concurrency,
+    'execution-environment': executionEnvironment,
+    'vpc-connector': vpcConnector,
+    'vpc-egress': vpcEgress,
+    ingress,
+    'revision-suffix': revisionSuffix ?? undefined,
+    'service-account': serviceAccount,
+    timeout,
+    'add-cloudsql-instances': cloudSqlInstance,
+    tag: (tagWithVersion && packageVersion) ?? undefined,
+    'cpu-boost': cpuBoost,
+    'no-traffic': noTraffic ?? undefined,
+    'allow-unauthenticated': allowUnauthenticated ?? undefined,
+    'add-volume': volumeName ? `name=${volumeName}` : undefined,
+  }
 
-    // Add the primary container
-    ...getContainerFlags(options, sidecars.length > 0),
+  // Convert args to command line flags
+  const baseFlags = yargsUnparser(args)
+  
+  // Get container flags
+  const containerFlags = getContainerFlags(options, sidecars.length > 0)
+  const sidecarFlags = sidecars.flatMap((sidecarOptions) => getContainerFlags(sidecarOptions, true))
 
-    // Add all sidecars
-    ...sidecars.flatMap((sidecarOptions) => getContainerFlags(sidecarOptions, true)),
-  ]), {
-    cwd: distDirectory
-  }, options.dryRun)
+  // Build final command with proper spacing
+  const commandParts = [
+    gcloudDeploy,
+    ...baseFlags,
+    ...containerFlags,
+    ...sidecarFlags
+  ].filter(Boolean)
+  
+  const fullCommand = commandParts.join(' ')
+
+  return execCommand(fullCommand, {}, options.dryRun)
 }
 
 export default deployExecutor
